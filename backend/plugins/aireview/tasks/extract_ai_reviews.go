@@ -415,6 +415,39 @@ func extractSummary(body string) string {
 		}
 	}
 
+	// Gemini Code Assist format: PR-level summary comment
+	// Format: "## Summary of Changes\n\nHello @user, I'm Gemini Code Assist...\n\nThis pull request [summary]...\n\n### Highlights\n* ..."
+	if len(summaryParts) == 0 && strings.Contains(cleaned, "Summary of Changes") && strings.Contains(cleaned, "Gemini Code Assist") {
+		// Extract the first substantive paragraph after the greeting line
+		paragraphs := regexp.MustCompile(`\n\s*\n`).Split(cleaned, -1)
+		for _, p := range paragraphs {
+			p = strings.TrimSpace(p)
+			// Skip headers, greeting line, and short lines
+			if strings.HasPrefix(p, "#") || strings.Contains(p, "Gemini Code Assist") || len(p) < 30 {
+				continue
+			}
+			summaryParts = append(summaryParts, p)
+			break
+		}
+		// Also extract Highlights items
+		highlightsRe := regexp.MustCompile(`(?m)^\*\s+\*\*([^*]+)\*\*`)
+		for _, match := range highlightsRe.FindAllStringSubmatch(cleaned, 3) {
+			summaryParts = append(summaryParts, match[1])
+		}
+	}
+
+	// Gemini Code Assist format: Inline review comment with priority badge
+	// Format: "![medium](https://www.gstatic.com/codereviewagent/medium-priority.svg)\n\n[review text]"
+	// May have multiple badges on one line: "![security-high](...) ![high](...)\n\n[review text]"
+	if len(summaryParts) == 0 && strings.Contains(cleaned, "gstatic.com/codereviewagent") {
+		// Strip all image badge references (may appear multiple times on a line)
+		badgeRe := regexp.MustCompile(`!\[[^\]]*\]\([^)]*gstatic\.com/codereviewagent[^)]*\)\s*`)
+		stripped := strings.TrimSpace(badgeRe.ReplaceAllString(cleaned, ""))
+		if len(stripped) > 20 {
+			summaryParts = append(summaryParts, stripped)
+		}
+	}
+
 	// CodeRabbit format: Look for "Walkthrough" section
 	if len(summaryParts) == 0 && strings.Contains(cleaned, "Walkthrough") {
 		walkRe := regexp.MustCompile(`(?is)Walkthrough\s*\n+(.+?)(\n\n|$)`)
@@ -434,9 +467,14 @@ func extractSummary(body string) string {
 
 	// Generic: Look for summary/overview sections
 	if len(summaryParts) == 0 {
-		summaryRe := regexp.MustCompile(`(?i)(summary|overview)[:\s]+(.{10,300})`)
+		// Match "Summary:" or "Overview:" followed by content, but not "Summary of Changes" (Gemini heading)
+		summaryRe := regexp.MustCompile(`(?i)(summary|overview)[:\s]+(?:of\s+changes\s*)?(.{10,300})`)
 		if match := summaryRe.FindStringSubmatch(cleaned); len(match) > 2 {
-			summaryParts = append(summaryParts, strings.TrimSpace(match[2]))
+			text := strings.TrimSpace(match[2])
+			// Skip if it's just a Gemini heading remainder
+			if !strings.HasPrefix(strings.ToLower(text), "of changes") {
+				summaryParts = append(summaryParts, text)
+			}
 		}
 	}
 
@@ -450,6 +488,7 @@ func extractSummary(body string) string {
 				!strings.HasPrefix(p, "#") &&
 				!strings.HasPrefix(p, "http") &&
 				!strings.HasPrefix(p, "[") &&
+				!strings.HasPrefix(p, "![") &&
 				!strings.Contains(p, "```") {
 				summaryParts = append(summaryParts, p)
 				break
@@ -488,9 +527,15 @@ func extractSummary(body string) string {
 
 // htmlToMarkdown converts HTML elements to markdown equivalents while preserving structure
 func htmlToMarkdown(body string) string {
-	// Replace escaped newlines
+	// Strip surrounding JSON quotes if present (bodies may be stored with JSON quoting)
+	if len(body) >= 2 && body[0] == '"' && body[len(body)-1] == '"' {
+		body = body[1 : len(body)-1]
+	}
+
+	// Replace escaped newlines and quotes (from JSON encoding)
 	body = strings.ReplaceAll(body, "\\n", "\n")
 	body = strings.ReplaceAll(body, "\\r", "")
+	body = strings.ReplaceAll(body, "\\\"", "\"")
 
 	// Remove HTML comments first
 	commentRe := regexp.MustCompile(`<!--.*?-->`)

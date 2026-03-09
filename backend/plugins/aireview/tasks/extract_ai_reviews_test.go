@@ -291,6 +291,41 @@ func TestExtractSummary(t *testing.T) {
 			wantContain: "Effort: 2/5",
 			wantNotContain: "<table>",
 		},
+		{
+			name:        "Gemini PR-level summary extracts content after greeting",
+			body:        "## Summary of Changes\n\nHello @user, I'm Gemini Code Assist[^1]! Here is my review.\n\nThis pull request refactors the authentication module to use JWT tokens instead of session cookies, improving scalability.\n\n### Highlights\n\n* **Token rotation**: Added automatic token refresh logic\n* **Session cleanup**: Removed legacy session store",
+			wantContain: "This pull request refactors the authentication module",
+			wantNotContain: "of Changes",
+		},
+		{
+			name:           "Gemini inline review strips priority badge",
+			body:           "![medium](https://www.gstatic.com/codereviewagent/medium-priority.svg)\n\nThe error returned by `db.Save()` is not checked here, which could silently drop write failures.",
+			wantContain:    "error returned by",
+			wantNotContain: "gstatic.com",
+		},
+		{
+			name:           "Gemini inline review with JSON-quoted body",
+			body:           "\"![medium](https://www.gstatic.com/codereviewagent/medium-priority.svg)\\n\\nThis test uses the `eth4` interface, which is not created in the test setup.\"",
+			wantContain:    "This test uses the",
+			wantNotContain: "gstatic.com",
+		},
+		{
+			name:           "Gemini inline review with multiple badges",
+			body:           "\"![security-high](https://www.gstatic.com/codereviewagent/security-high-priority.svg) ![high](https://www.gstatic.com/codereviewagent/high-priority.svg)\\n\\nA command injection vulnerability exists here.\"",
+			wantContain:    "command injection vulnerability",
+			wantNotContain: "gstatic.com",
+		},
+		{
+			name:        "Gemini PR summary extracts highlights",
+			body:        "## Summary of Changes\n\nHello @dev, I'm Gemini Code Assist[^1]!\n\nThis PR adds retry logic for failed API calls to improve resilience.\n\n### Highlights\n\n* **Exponential backoff**: Implements configurable retry delays\n* **Circuit breaker**: Prevents cascading failures",
+			wantContain: "Exponential backoff",
+		},
+		{
+			name:           "Generic summary regex does not match Gemini heading",
+			body:           "## Summary of Changes\n\nSome unrelated content that is long enough to be a paragraph for extraction purposes.",
+			wantContain:    "Some unrelated content",
+			wantNotContain: "of Changes",
+		},
 	}
 
 	for _, tt := range tests {
