@@ -18,6 +18,7 @@ limitations under the License.
 package tasks
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -165,7 +166,7 @@ func TestFetchAwardEmojis(t *testing.T) {
 	defer server.Close()
 
 	client := server.Client()
-	emojis, err := fetchAwardEmojis(client, server.URL, "test-token", 100, 42, 999)
+	emojis, err := fetchAwardEmojis(context.Background(), client, server.URL, "test-token", 100, 42, 999)
 	assert.NoError(t, err)
 	assert.Len(t, emojis, 3)
 
@@ -183,7 +184,7 @@ func TestFetchAwardEmojis_Unauthorized(t *testing.T) {
 	defer server.Close()
 
 	client := server.Client()
-	_, err := fetchAwardEmojis(client, server.URL, "bad-token", 100, 42, 999)
+	_, err := fetchAwardEmojis(context.Background(), client, server.URL, "bad-token", 100, 42, 999)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "401")
 }
@@ -196,7 +197,7 @@ func TestFetchAwardEmojis_EmptyResponse(t *testing.T) {
 	defer server.Close()
 
 	client := server.Client()
-	emojis, err := fetchAwardEmojis(client, server.URL, "token", 100, 42, 999)
+	emojis, err := fetchAwardEmojis(context.Background(), client, server.URL, "token", 100, 42, 999)
 	assert.NoError(t, err)
 	assert.Empty(t, emojis)
 }

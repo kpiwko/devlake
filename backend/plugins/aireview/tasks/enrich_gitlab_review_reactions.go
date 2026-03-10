@@ -18,6 +18,7 @@ limitations under the License.
 package tasks
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -98,8 +99,7 @@ func EnrichGitlabReviewReactions(taskCtx plugin.SubTaskContext) errors.Error {
 
 	cursor, err := db.Cursor(reviewClauses...)
 	if err != nil {
-		logger.Info("No GitLab reviews found or GitLab tables not available, skipping")
-		return nil
+		return errors.Default.Wrap(err, "failed to query GitLab reviews")
 	}
 	defer cursor.Close()
 
@@ -169,6 +169,7 @@ func EnrichGitlabReviewReactions(taskCtx plugin.SubTaskContext) errors.Error {
 			logger.Warn(infoErr, "failed to query GitLab note details for connection %d, skipping", connId)
 			continue
 		}
+		defer infoCursor.Close()
 
 		// Collect note info
 		var noteInfos []gitlabNoteInfo
@@ -181,14 +182,13 @@ func EnrichGitlabReviewReactions(taskCtx plugin.SubTaskContext) errors.Error {
 			info.ReviewId = noteToReviewId[noteKey{connId, info.NoteGitlabId}]
 			noteInfos = append(noteInfos, info)
 		}
-		infoCursor.Close()
 
 		endpoint := strings.TrimRight(conn.Endpoint, "/")
 
 		// Step 3: Call award emoji API for each note
 		for _, info := range noteInfos {
 			emojis, fetchErr := fetchAwardEmojis(
-				httpClient, endpoint, conn.Token,
+				taskCtx.GetContext(), httpClient, endpoint, conn.Token,
 				info.ProjectId, info.MergeRequestIid, info.NoteGitlabId,
 			)
 			if fetchErr != nil {
@@ -237,11 +237,11 @@ func parseGitlabDomainId(domainId string) (uint64, int, error) {
 }
 
 // fetchAwardEmojis calls the GitLab API to get award emojis for a MR note.
-func fetchAwardEmojis(client *http.Client, endpoint, token string, projectId, mrIid, noteId int) ([]awardEmoji, error) {
+func fetchAwardEmojis(ctx context.Context, client *http.Client, endpoint, token string, projectId, mrIid, noteId int) ([]awardEmoji, error) {
 	url := fmt.Sprintf("%s/projects/%d/merge_requests/%d/notes/%d/award_emoji?per_page=100",
 		endpoint, projectId, mrIid, noteId)
 
-	req, err := http.NewRequest("GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, err
 	}
