@@ -81,18 +81,38 @@ func FetchMissingCiJobs(taskCtx plugin.SubTaskContext) errors.Error {
 		return nil
 	}
 
-	repoId := data.Options.RepoId
-	if repoId == "" {
-		logger.Debug("No repoId set, skipping fetchMissingCiJobs")
-		return nil
-	}
-
 	cutoff := time.Now().AddDate(0, 0, -cfg.CiBackfillDays)
 
 	// ---- 1. Find PRs with AI reviews but no CI job rows ----
-	missing, findErr := findMissingPRs(db, repoId, cutoff)
-	if findErr != nil {
-		return errors.Default.Wrap(findErr, "querying missing CI PRs")
+	// aireview is a metric plugin — it has no per-repo scope, so we query all
+	// repos that have AI reviews (or just the one repo if RepoId is set).
+	repoId := data.Options.RepoId
+	var repoIds []string
+	if repoId != "" {
+		repoIds = []string{repoId}
+	} else {
+		var repoRows []struct {
+			RepoId string `gorm:"column:repo_id"`
+		}
+		if dbErr := db.All(&repoRows, dal.Select("DISTINCT repo_id"), dal.From("_tool_aireview_reviews")); dbErr != nil {
+			return errors.Default.Wrap(dbErr, "querying distinct repo IDs from aireview reviews")
+		}
+		for _, r := range repoRows {
+			repoIds = append(repoIds, r.RepoId)
+		}
+	}
+	if len(repoIds) == 0 {
+		logger.Info("No repos with AI reviews found, nothing to backfill")
+		return nil
+	}
+
+	var missing []missingPR
+	for _, rid := range repoIds {
+		prs, findErr := findMissingPRs(db, rid, cutoff)
+		if findErr != nil {
+			return errors.Default.Wrap(findErr, "querying missing CI PRs for repo "+rid)
+		}
+		missing = append(missing, prs...)
 	}
 	if len(missing) == 0 {
 		logger.Info("No PRs missing CI data, nothing to backfill")
