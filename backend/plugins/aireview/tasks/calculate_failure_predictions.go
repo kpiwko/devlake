@@ -48,6 +48,7 @@ type prAiSummary struct {
 	RepoShortName  string
 	AiTool         string
 	MaxRiskScore   int
+	CreatedDate    time.Time
 }
 
 // prCiKey identifies a PR in the ci_test_jobs table.
@@ -167,6 +168,7 @@ func CalculateFailurePredictions(taskCtx plugin.SubTaskContext) errors.Error {
 				CiFailureSource:       source,
 				WasFlaggedRisky:       wasFlaggedRisky,
 				RiskScore:             ps.MaxRiskScore,
+				FlaggedAt:             ps.CreatedDate,
 				HadCiFailure:          hadCiFailure,
 				PredictionOutcome:     predictionOutcome,
 				ObservationWindowDays: 0,
@@ -254,18 +256,19 @@ func buildFlakyJobSet(db dal.Dal) (map[string]bool, errors.Error) {
 // Supports both single-repo mode (repoId set) and project mode (projectName set).
 func loadAiReviewPrSummaries(db dal.Dal, repoId, projectName string) ([]prAiSummary, errors.Error) {
 	var rows []struct {
-		PullRequestId  string `gorm:"column:pull_request_id"`
-		PullRequestKey string `gorm:"column:pull_request_key"`
-		RepoId         string `gorm:"column:repo_id"`
-		RepoName       string `gorm:"column:repo_name"`
-		AiTool         string `gorm:"column:ai_tool"`
-		MaxRiskScore   int    `gorm:"column:max_risk_score"`
+		PullRequestId  string    `gorm:"column:pull_request_id"`
+		PullRequestKey string    `gorm:"column:pull_request_key"`
+		RepoId         string    `gorm:"column:repo_id"`
+		RepoName       string    `gorm:"column:repo_name"`
+		AiTool         string    `gorm:"column:ai_tool"`
+		MaxRiskScore   int       `gorm:"column:max_risk_score"`
+		CreatedDate    time.Time `gorm:"column:created_date"`
 	}
 
 	var clauses []dal.Clause
 	if repoId != "" {
 		clauses = []dal.Clause{
-			dal.Select("ar.pull_request_id, pr.pull_request_key, ar.repo_id, r.name AS repo_name, ar.ai_tool, MAX(ar.risk_score) AS max_risk_score"),
+			dal.Select("ar.pull_request_id, pr.pull_request_key, ar.repo_id, r.name AS repo_name, ar.ai_tool, MAX(ar.risk_score) AS max_risk_score, MIN(ar.created_date) AS created_date"),
 			dal.From("_tool_aireview_reviews ar"),
 			dal.Join("JOIN pull_requests pr ON ar.pull_request_id = pr.id"),
 			dal.Join("JOIN repos r ON ar.repo_id = r.id"),
@@ -274,7 +277,7 @@ func loadAiReviewPrSummaries(db dal.Dal, repoId, projectName string) ([]prAiSumm
 		}
 	} else {
 		clauses = []dal.Clause{
-			dal.Select("ar.pull_request_id, pr.pull_request_key, ar.repo_id, r.name AS repo_name, ar.ai_tool, MAX(ar.risk_score) AS max_risk_score"),
+			dal.Select("ar.pull_request_id, pr.pull_request_key, ar.repo_id, r.name AS repo_name, ar.ai_tool, MAX(ar.risk_score) AS max_risk_score, MIN(ar.created_date) AS created_date"),
 			dal.From("_tool_aireview_reviews ar"),
 			dal.Join("JOIN pull_requests pr ON ar.pull_request_id = pr.id"),
 			dal.Join("JOIN repos r ON ar.repo_id = r.id"),
@@ -298,6 +301,7 @@ func loadAiReviewPrSummaries(db dal.Dal, repoId, projectName string) ([]prAiSumm
 			RepoShortName:  repoShortNameFrom(r.RepoName),
 			AiTool:         r.AiTool,
 			MaxRiskScore:   r.MaxRiskScore,
+			CreatedDate:    r.CreatedDate,
 		}
 	}
 	return summaries, nil
